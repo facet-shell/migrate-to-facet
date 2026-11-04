@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# migrate-to-facet: moves a frameshell install over to facet, once. Afterwards the command is
+# facet, and this repo is not needed any more.
+#
+#   curl -fsSL https://raw.githubusercontent.com/facet-shell/migrate-to-facet/main/migrate-to-facet | bash
+#
+# What it does: points the CLI and every module at github.com/facet-shell (the org was
+# frame-shell), pulls the CLI, which is called facet now, and runs facet update. That links
+# ~/.local/bin/facet, removes the old frame command and its completions, and updates the
+# rest. Your settings, themes and backups stay where they are.
+set -euo pipefail
+
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/frameshell"
+CLI="$DATA/cli"
+
+say() { printf '  %s\n' "$*"; }
+die() { printf '  ✗ %s\n' "$*" >&2; exit 1; }
+
+[[ -d $CLI/.git ]] || die "No frameshell install found in $CLI"
+printf '\n  migrate-to-facet\n\n'
+
+# Local changes would stop the pull; better to say so than to leave it half done
+for repo in "$CLI" "$DATA"/modules/*/; do
+  [[ -d $repo/.git ]] || continue
+  if [[ -n $(git -C "$repo" status --porcelain --untracked-files=no) ]]; then
+    die "$(basename "$repo") has local changes; keep them aside (git -C $repo stash), then run this again"
+  fi
+done
+
+# The new org; GitHub redirects the old URLs too, but not for ever
+for repo in "$CLI" "$DATA"/modules/*/; do
+  [[ -d $repo/.git ]] || continue
+  url=$(git -C "$repo" remote get-url origin)
+  new=${url/github.com\/frame-shell\//github.com\/facet-shell\/}
+  if [[ $new != "$url" ]]; then
+    git -C "$repo" remote set-url origin "$new"
+    say "✓ $(basename "$repo") → $new"
+  fi
+done
+
+git -C "$CLI" pull --ff-only --quiet || die "Could not pull the CLI; check the internet connection and run this again"
+[[ -x $CLI/facet ]] || die "The CLI has no facet command yet; try again later"
+say "✓ the CLI is facet now"
+printf '\n'
+
+# facet update links facet, drops the frame command and updates everything else
+exec "$CLI/facet" update "$@"
